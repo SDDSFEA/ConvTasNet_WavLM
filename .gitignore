@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+
+# Model checkpoints
+Conv-TasNet-clean100-*/
+
+# Pretrained models
+wavlm_large_pretrained/
+
+# Result directories
+result*/
+
+# Numpy arrays
+*.npy
