@@ -3,7 +3,7 @@ __pycache__/
 *.pyo
 
 # Model checkpoints
-Conv-TasNet-clean100-*/
+*.pt
 
 # Pretrained models
 wavlm_large_pretrained/
