@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数据仿真与评估使用指南 · ConvTasNet + WavLM</title>
+<style>
+  :root{
+    --bg:#0f172a; --panel:#1e293b; --ink:#e2e8f0; --muted:#94a3b8;
+    --accent:#38bdf8; --accent2:#34d399; --warn:#fbbf24; --line:#334155;
+    --code-bg:#0b1220;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    line-height:1.75; font-size:16px;
+  }
+  .wrap{max-width:960px; margin:0 auto; padding:32px 24px 80px;}
+  header{
+    border-bottom:1px solid var(--line); padding-bottom:20px; margin-bottom:28px;
+  }
+  h1{font-size:28px; margin:0 0 6px;}
+  h1 .sub{color:var(--muted); font-size:15px; font-weight:400;}
+  h2{
+    font-size:22px; margin:40px 0 14px; padding-left:12px;
+    border-left:4px solid var(--accent);
+  }
+  h3{font-size:17px; margin:26px 0 10px; color:var(--accent2);}
+  p,li{color:var(--ink);}
+  code{
+    background:var(--code-bg); padding:2px 6px; border-radius:4px;
+    font-family:"SF Mono",Consolas,Menlo,monospace; font-size:14px; color:#fcd34d;
+  }
+  pre{
+    background:var(--code-bg); border:1px solid var(--line); border-radius:8px;
+    padding:16px; overflow-x:auto; font-size:14px; line-height:1.6;
+  }
+  pre code{background:none; padding:0; color:#d1fae5;}
+  .panel{
+    background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    padding:18px 22px; margin:18px 0;
+  }
+  .note{border-left:4px solid var(--warn); background:#2a2410;}
+  .note strong{color:var(--warn);}
+  .ok{border-left:4px solid var(--accent2); background:#0e2a1f;}
+  table{border-collapse:collapse; width:100%; margin:14px 0; font-size:14px;}
+  th,td{border:1px solid var(--line); padding:8px 12px; text-align:left;}
+  th{background:#0b1220; color:var(--accent);}
+  td code{font-size:13px;}
+  .tag{
+    display:inline-block; background:var(--accent); color:#082f49;
+    font-size:12px; font-weight:700; padding:1px 8px; border-radius:20px;
+    vertical-align:middle; margin-left:8px;
+  }
+  .toc{font-size:15px;}
+  .toc a{color:var(--accent); text-decoration:none;}
+  .toc a:hover{text-decoration:underline;}
+  .filetree{color:var(--muted); font-size:13px;}
+  .filetree b{color:var(--accent2);}
+  hr{border:none; border-top:1px solid var(--line); margin:32px 0;}
+  .kbd{font-family:monospace; background:#0b1220; border:1px solid var(--line);
+       border-bottom-width:2px; border-radius:4px; padding:1px 6px; font-size:13px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>数据仿真与评估使用指南<span class="tag">ConvTasNet + WavLM</span></h1>
+  <div class="sub">如何做语音分离的数据仿真（synthesize_datasets.py）与结果评估（evaluate.py），统一入口：<code>run_inference.sh</code></div>
+</header>
+
+<div class="panel">
+  <div class="toc">
+    <b>目录</b><br>
+    0. <a href="#prep">环境准备（依赖安装）</a><br>
+    1. <a href="#overview">整体流程概览</a><br>
+    2. <a href="#simulation">数据仿真（四种声学条件）</a><br>
+    3. <a href="#evaluation">结果评估（SI-SDR / SI-SDRi / PESQ / STOI / WER）</a><br>
+    4. <a href="#oneshot">一键「推理 + 评估」</a><br>
+    5. <a href="#faq">常见问题</a>
+  </div>
+</div>
+
+<div class="panel note">
+  <strong>脚本位置：</strong> 仿真与评估的全部脚本都在仓库的 <code>sim_eval/</code> 子目录里
+  （<code>synthesize_datasets.py</code> / <code>evaluate.py</code> / <code>run_inference.sh</code> / 本指南）。
+  运行方式二选一：① <code>cd sim_eval &amp;&amp; ./run_inference.sh ...</code>；
+  ② 在仓库根目录直接 <code>./sim_eval/run_inference.sh ...</code>。<br>
+  下文凡是单独写 <code>python evaluate.py</code> / <code>python synthesize_datasets.py</code> 的例子，
+  均假设当前目录在 <code>sim_eval/</code> 内。脚本会自动定位仓库根目录来调用 <code>Separation_nets.py</code>、读取 <code>data/text/</code> 等。
+</div>
+
+<!-- ================= 0. 环境准备 ================= -->
+<h2 id="prep">0. 环境准备</h2>
+<p>核心库（torch / torchaudio / numpy / scipy / soundfile / librosa / transformers）一般已经装好。
+评估额外依赖以下三个指标库 + 一个 ASR 模型（用于算 WER）：</p>
+<pre><code># 指标库
+pip install pesq pystoi jiwer
+
+# WER 用的 ASR：脚本默认用 transformers 自动下载 openai/whisper-tiny.en（约 40MB）
+# 首次运行会联网下载，之后会走本地缓存</code></pre>
+<div class="panel note">
+  <strong>提示：</strong> 如果机器不能联网，加 <code>--no-wer</code> 跳过 WER（其余四个指标照常计算）。
+  本仓库新版 <code>torchaudio.load</code> 需要 <code>torchcodec</code>，所以 <code>evaluate.py</code> 内部统一改用 <code>soundfile</code> 读音频，无需额外安装。
+</div>
+
+<!-- ================= 1. 流程概览 ================= -->
+<h2 id="overview">1. 整体流程概览</h2>
+<p>三个脚本各司其职，全部通过 <code>run_inference.sh</code> 调用：</p>
+<table>
+  <tr><th>脚本</th><th>作用</th><th>对应子命令</th></tr>
+  <tr><td><code>synthesize_datasets.py</code></td><td>仿真 / 合成两说话人混合数据（四种条件）</td><td><code>synth</code></td></tr>
+  <tr><td><code>Separation_nets.py</code>（仓库已有）</td><td>用训练好的模型做分离推理，输出 spk1/spk2</td><td><code>run</code></td></tr>
+  <tr><td><code>evaluate.py</code></td><td>对分离结果打分（5 个指标 + PIT 排列）</td><td><code>eval</code></td></tr>
+</table>
+<p>典型流水线：<b>仿真数据</b> → <b>模型分离</b> → <b>评估打分</b>。</p>
+<pre><code>仿真混合音  ──►  模型推理        ──►  评估
+synth            run (Separation_nets.py)   eval
+                 输出 spk1/ spk2/           输出指标表格</code></pre>
+
+<!-- ================= 2. 数据仿真 ================= -->
+<h2 id="simulation">2. 数据仿真</h2>
+
+<h3>2.1 一条命令生成</h3>
+<pre><code># 每种条件生成 3 条混合音，输出到 synth_data/
+./run_inference.sh synth 3 synth_data
+
+# 等价于直接调用 python：
+python synthesize_datasets.py --n-pairs 3 --out synth_data</code></pre>
+
+<h3>2.2 四种声学条件（2×2 鲁棒性网格）</h3>
+<table>
+  <tr><th>条件</th><th>含义</th><th>混合公式</th></tr>
+  <tr><td><code>clean</code></td><td>纯净</td><td>s1 + s2</td></tr>
+  <tr><td><code>noise</code></td><td>加噪</td><td>s1 + s2 + 噪声（SNR 0–10 dB 随机）</td></tr>
+  <tr><td><code>reverb</code></td><td>混响</td><td>reverb(s1) + reverb(s2)</td></tr>
+  <tr><td><code>noise_reverb</code></td><td>加噪 + 混响</td><td>reverb(s1) + reverb(s2) + 噪声</td></tr>
+</table>
+
+<h3>2.3 输出目录结构</h3>
+<p>每个条件一个子目录，布局与 LibriMix <code>wav8k/max/&lt;set&gt;/</code> 完全一致，<b>单声道、8000&nbsp;Hz</b>：</p>
+<pre class="filetree"><code>synth_data/
+  ├─ <b>clean</b>/
+  │    ├─ mix/      ← 喂给分离模型的混合音  <key>.wav
+  │    ├─ s1/       ← 干净参考源 1（评估用）
+  │    ├─ s2/       ← 干净参考源 2
+  │    ├─ text_spk1 ← "<key> 转写文本" （算 WER 用）
+  │    ├─ text_spk2
+  │    └─ metadata.csv
+  ├─ <b>noise</b>/  ...（同上结构）
+  ├─ <b>reverb</b>/
+  └─ <b>noise_reverb</b>/</code></pre>
+
+<h3>2.4 用真实语音作为声源（推荐）</h3>
+<p>默认用「类语音合成信号」，能让脚本在任何机器上跑通（CI / 无数据冒烟测试）。
+若想用<b>真实语音</b>（如 LibriSpeech 切片），把一个装满 <code>.wav</code> 的目录传给 <code>--source-dir</code>，脚本会两两配对：</p>
+<pre><code>python synthesize_datasets.py \
+    --n-pairs 50 \
+    --source-dir /path/to/librispeech_wavs \
+    --out synth_data_real</code></pre>
+
+<h3>2.5 常用参数</h3>
+<table>
+  <tr><th>参数</th><th>默认</th><th>说明</th></tr>
+  <tr><td><code>--n-pairs</code></td><td>3</td><td>每种条件生成多少条混合音</td></tr>
+  <tr><td><code>--out</code></td><td>synth_data</td><td>输出根目录</td></tr>
+  <tr><td><code>--dur</code></td><td>3.0</td><td>合成信号时长（秒），仅合成模式生效</td></tr>
+  <tr><td><code>--source-dir</code></td><td>（空）</td><td>真实语音目录；不填则用合成信号</td></tr>
+  <tr><td><code>--conditions</code></td><td>四种全做</td><td>只做子集，如 <code>--conditions clean noise</code></td></tr>
+  <tr><td><code>--seed</code></td><td>0</td><td>随机种子，保证可复现</td></tr>
+</table>
+
+<div class="panel ok">
+  <strong>预期输出（synth 子命令）：</strong>
+<pre><code>Per-condition mixture counts:
+----------------------------------------
+  clean             3 mixtures
+  noise             3 mixtures
+  reverb            3 mixtures
+  noise_reverb      3 mixtures
+----------------------------------------
+  TOTAL            12 mixtures</code></pre>
+</div>
+
+<!-- ================= 3. 评估 ================= -->
+<h2 id="evaluation">3. 结果评估</h2>
+
+<h3>3.1 模型的真实输出格式（评估的输入）</h3>
+<p>分离模型（<code>Separation_nets.py</code>）把结果写成下面的布局——这正是 <code>evaluate.py</code> 读取的格式：</p>
+<pre class="filetree"><code>&lt;save_path&gt;/
+  ├─ <b>spk1</b>/<key>.wav   ← 估计的说话人 1
+  └─ <b>spk2</b>/<key>.wav   ← 估计的说话人 2
+
+· 固定 2 个源，目录名就叫 spk1 / spk2
+· <key> 与混合音、参考源 s1/s2 的文件名完全相同（这是对齐的关键）
+· 单声道，8000 Hz</code></pre>
+
+<h3>3.2 评估命令</h3>
+<pre><code># 最简：自动寻找输出目录旁边的 _refs/ 参考（冒烟测试时）
+./run_inference.sh eval &lt;输出目录&gt;
+
+# 真实场景：显式指定参考源 / 混合音 / 转写文本
+python evaluate.py enhanced/myrun \
+    --ref-dir   /lustre/.../LibriMix/Libri2Mix/wav8k/max/test \
+    --mix-dir   /lustre/.../LibriMix/Libri2Mix/wav8k/max/test/mix_both \
+    --text-spk1 data/text/test/text_spk1 \
+    --text-spk2 data/text/test/text_spk2</code></pre>
+
+<h3>3.3 五个评估指标</h3>
+<table>
+  <tr><th>指标</th><th>含义</th><th>方向</th></tr>
+  <tr><td><b>SI-SDR</b></td><td>尺度不变信号失真比（dB），衡量分离质量</td><td>越大越好 ↑</td></tr>
+  <tr><td><b>SI-SDRi</b></td><td>相对「混合音直接当估计」基线的 SI-SDR 提升量</td><td>越大越好 ↑</td></tr>
+  <tr><td><b>PESQ</b></td><td>感知语音质量（窄带 nb @ 8 kHz）</td><td>越大越好 ↑（1–4.5）</td></tr>
+  <tr><td><b>STOI</b></td><td>短时客观可懂度（0–1）</td><td>越大越好 ↑</td></tr>
+  <tr><td><b>WER</b></td><td>分离音经 ASR 转写后与参考文本的词错误率</td><td>越小越好 ↓</td></tr>
+</table>
+<div class="panel note">
+  <strong>关于 PIT 排列：</strong> 两个估计源到底对应哪个参考源是未知的。评估时按 <b>SI-SDR 最大化</b>
+  在两种排列里自动选最优配对（输出里的 <code>perm=01</code> / <code>perm=10</code> 就是选中的排列），
+  其余指标都在选中的配对下计算。<u>这套排列逻辑与指标公式是标准实现，请勿改动。</u>
+</div>
+
+<h3>3.4 评估输出示例</h3>
+<pre><code>Evaluating 5 utterance(s) from fixture_out
+
+  utt_0000   perm=01  SI-SDR= 10.00  SI-SDRi=  9.99  PESQ=1.06  STOI=0.447  WER=...
+  utt_0001   perm=10  SI-SDR= 10.01  SI-SDRi= 10.01  PESQ=1.06  STOI=0.411  WER=...
+  ...
+==============================================================================
+SUMMARY (n=5)           SI-SDR   SI-SDRi     PESQ     STOI      WER
+------------------------------------------------------------------------------
+mean                     10.00      9.89     1.06    0.373     ...
+==============================================================================</code></pre>
+
+<h3>3.5 常用参数</h3>
+<table>
+  <tr><th>参数</th><th>默认</th><th>说明</th></tr>
+  <tr><td><code>--ref-dir</code></td><td>自动找 _refs</td><td>含 s1/ s2/ 的参考源目录</td></tr>
+  <tr><td><code>--mix-dir</code></td><td>（空）</td><td>混合音目录；提供后才能算 SI-SDRi</td></tr>
+  <tr><td><code>--text-spk1/2</code></td><td>（空）</td><td>参考转写（<code>text_spkN</code> 或 GT csv）；提供后才算 WER</td></tr>
+  <tr><td><code>--limit</code></td><td>0（全部）</td><td>只评估前 N 条，调试用</td></tr>
+  <tr><td><code>--no-wer</code></td><td>—</td><td>跳过 ASR/WER（不联网时用）</td></tr>
+  <tr><td><code>--asr-model</code></td><td>whisper-tiny.en</td><td>换更大的 ASR，如 <code>openai/whisper-base.en</code></td></tr>
+  <tr><td><code>--sr</code></td><td>8000</td><td>采样率，与模型输出一致</td></tr>
+</table>
+
+<!-- ================= 4. 一键推理+评估 ================= -->
+<h2 id="oneshot">4. 一键「推理 + 评估」</h2>
+<p><code>run_eval</code> 子命令把<b>模型分离</b>和<b>评估</b>串成一步：先调用 <code>Separation_nets.py</code> 生成 spk1/spk2，再自动评估。</p>
+<pre><code># 用环境变量指定 checkpoint / 网络结构 / 评估集，再一键跑
+MODEL_CKPT=/path/best.pt \
+MODEL_NET=Net_dwAtt_film \
+EVAL_SET=test \
+LIBRIMIX_ROOT=/lustre/.../LibriMix/Libri2Mix/wav8k/max \
+./run_inference.sh run_eval  tt_mix.scp  enhanced/myrun  --limit 50</code></pre>
+<p>参考源 / 混合音 / 转写默认按 <code>LIBRIMIX_ROOT</code> + <code>EVAL_SET</code> 推导（与 <code>inferece.sh</code>、<code>SI_SNR_eval.py</code> 一致），存在才传入；也可在命令末尾追加 <code>evaluate.py</code> 的任意参数（如 <code>--no-wer</code>）。</p>
+<div class="panel note">
+  <strong>注意：</strong> <code>run</code> / <code>run_eval</code> 的<u>推理那一步</u>需要训练好的 checkpoint、GPU、WavLM 权重以及 LibriMix 数据；
+  没有这些时请先用 <code>synth</code> 造数据、或直接用已有的 spk1/spk2 目录跑 <code>eval</code>。
+</div>
+
+<!-- ================= 5. FAQ ================= -->
+<h2 id="faq">5. 常见问题</h2>
+
+<h3>Q1：合成数据上 WER 很大（远大于 1）正常吗？</h3>
+<p>正常。合成的「类语音」信号不是真实语音，Whisper 会瞎猜导致大量插入错误，
+WER =（替换+删除+插入）/ 参考词数，插入太多就会 &gt; 1。这是真实计算结果，不是 bug。
+想看有意义的 WER，请用 <code>--source-dir</code> 喂真实语音。</p>
+
+<h3>Q2：只想快速验证脚本能跑通，但没有模型？</h3>
+<p>用 <code>fixture</code> 造一份「模型格式」的假输出（参考源 + 噪声、部分打乱顺序以检验 PIT），再评估：</p>
+<pre><code>./run_inference.sh fixture fixture_out 5
+./run_inference.sh eval    fixture_out</code></pre>
+
+<h3>Q3：评估真实 LibriMix 结果时参考源放哪？</h3>
+<p>用 <code>--ref-dir</code> 指向 <code>.../wav8k/max/&lt;test|dev&gt;</code>（里面有 s1/ s2/），
+<code>--mix-dir</code> 指向同级 <code>mix_both</code>，转写用本仓库 <code>data/text/&lt;set&gt;/text_spk1</code>。</p>
+
+<h3>Q4：想改输出目录命名（不叫 spk1/spk2）？</h3>
+<p>只改 <code>evaluate.py</code> 顶部 <code>ADAPT-THIS</code> 区块的 <code>EST_SUBDIRS</code> / <code>REF_SUBDIRS</code>
+和四个路径钩子函数即可，指标与 PIT 逻辑无需动。</p>
+
+<hr>
+<p style="color:var(--muted); font-size:13px;">
+相关文件：<code>synthesize_datasets.py</code> · <code>evaluate.py</code> · <code>run_inference.sh</code> ·
+参考实现 <code>SI_SNR_eval.py</code> / <code>Separation_nets.py</code> / <code>inferece.sh</code>
+</p>
+
+</div>
+</body>
+</html>

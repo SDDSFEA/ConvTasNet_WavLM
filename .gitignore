@@ -13,3 +13,9 @@ result*/
 
 # Numpy arrays
 *.npy
+
+# Eval/synth scaffold outputs
+synth_data/
+synth_smoke/
+fixture_out/
+si_snr_gpu.npy
