@@ -7,7 +7,9 @@
 #   run      <mix_scp> <save_path>            run the real model (Separation_nets.py)
 #   eval     <output_dir> [evaluate.py args]  score a model-output dir (evaluate.py)
 #   run_eval <mix_scp> <save_path> [eval args] run the model THEN score it in one shot
-#   synth    [n_pairs] [out_dir]              build the 4-condition eval sets
+#   synth    [n_pairs] [out_dir]              build the 4 single-variable test sets
+#                                             (sir / noise / overlap / gender) from
+#                                             LibriSpeech test-clean ($LIBRISPEECH_TC)
 #   fixture  <dir> [n]                        synthetic model-format output for testing eval
 #
 # `run_eval` defaults its references to the LibriMix paths below (override per
@@ -44,6 +46,9 @@ REF_DIR="${REF_DIR:-$LIBRIMIX_ROOT/$EVAL_SET}"                      # contains s
 MIX_DIR="${MIX_DIR:-$LIBRIMIX_ROOT/$EVAL_SET/mix_both}"             # for SI-SDRi
 TEXT_SPK1="${TEXT_SPK1:-$REPO_ROOT/data/text/$EVAL_SET/text_spk1}"  # for WER (if present)
 TEXT_SPK2="${TEXT_SPK2:-$REPO_ROOT/data/text/$EVAL_SET/text_spk2}"
+
+# LibriSpeech test-clean root used by `synth` (single-variable test sets).
+LIBRISPEECH_TC="${LIBRISPEECH_TC:-/data/hshi/datasets/LibriSpeech/test-clean}"  # ADAPT-THIS
 
 run_model() {
   local mix_scp="$1" save_path="$2"
@@ -82,8 +87,8 @@ cmd_run_eval() {
 }
 
 cmd_synth() {
-  local n="${1:-3}" out="${2:-synth_data}"
-  "$PY" synthesize_datasets.py --n-pairs "$n" --out "$out"
+  local n="${1:-3}" out="${2:-testsets}"
+  "$PY" synthesize_datasets.py --n-pairs "$n" --out "$out" --librispeech "$LIBRISPEECH_TC"
 }
 
 cmd_eval() {

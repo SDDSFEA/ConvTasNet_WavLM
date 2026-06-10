@@ -19,3 +19,17 @@ synth_data/
 synth_smoke/
 fixture_out/
 si_snr_gpu.npy
+
+# Audio files
+*.wav
+
+# Generated test sets / inference outputs
+sim_eval/testsets/
+sim_eval/regen_out/
+enhanced/
+
+# Dataset lists, transcripts, CSVs (keep only the code in data/)
+data/audio_scp_8k/
+data/audio_scp_16k/
+data/text/*
+!data/text/convert2csv.py

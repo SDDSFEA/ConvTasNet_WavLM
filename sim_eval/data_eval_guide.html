@@ -76,7 +76,7 @@
     <b>目录</b><br>
     0. <a href="#prep">环境准备（依赖安装）</a><br>
     1. <a href="#overview">整体流程概览</a><br>
-    2. <a href="#simulation">数据仿真（四种声学条件）</a><br>
+    2. <a href="#simulation">数据仿真（四种单变量测试集）</a><br>
     3. <a href="#evaluation">结果评估（SI-SDR / SI-SDRi / PESQ / STOI / WER）</a><br>
     4. <a href="#oneshot">一键「推理 + 评估」</a><br>
     5. <a href="#faq">常见问题</a>
@@ -111,7 +111,7 @@ pip install pesq pystoi jiwer
 <p>三个脚本各司其职，全部通过 <code>run_inference.sh</code> 调用：</p>
 <table>
   <tr><th>脚本</th><th>作用</th><th>对应子命令</th></tr>
-  <tr><td><code>synthesize_datasets.py</code></td><td>仿真 / 合成两说话人混合数据（四种条件）</td><td><code>synth</code></td></tr>
+  <tr><td><code>synthesize_datasets.py</code></td><td>从 LibriSpeech test-clean 仿真两说话人混合数据（四种单变量条件）</td><td><code>synth</code></td></tr>
   <tr><td><code>Separation_nets.py</code>（仓库已有）</td><td>用训练好的模型做分离推理，输出 spk1/spk2</td><td><code>run</code></td></tr>
   <tr><td><code>evaluate.py</code></td><td>对分离结果打分（5 个指标 + PIT 排列）</td><td><code>eval</code></td></tr>
 </table>
@@ -122,67 +122,110 @@ synth            run (Separation_nets.py)   eval
 
 <!-- ================= 2. 数据仿真 ================= -->
 <h2 id="simulation">2. 数据仿真</h2>
+<p>用 <b>LibriSpeech test-clean 的真实语音</b>构建四套「单变量」两说话人测试集：
+每套只扫一个变量，其余条件固定（SIR=0&nbsp;dB、无噪声、完全重叠、性别不限——除非该变量正是被扫的那个）。
+适合做鲁棒性分析：横轴是变量档位，纵轴是指标。</p>
 
-<h3>2.1 一条命令生成</h3>
-<pre><code># 每种条件生成 3 条混合音，输出到 synth_data/
-./run_inference.sh synth 3 synth_data
+<h3>2.1 前置条件</h3>
+<ul>
+  <li>需要本地有 <b>LibriSpeech test-clean</b>（flac 原始格式即可，脚本自动重采样 16k→8k）。</li>
+  <li><code>SPEAKERS.TXT</code> 必须在 <code>test-clean/</code> 的<b>上一级目录</b>（LibriSpeech 官方解压布局即如此），用于查说话人性别。</li>
+  <li>只选用时长 3–10 秒的句子做声源，且每条声源最多截取 6 秒，保持测试集体积小。</li>
+</ul>
 
-# 等价于直接调用 python：
-python synthesize_datasets.py --n-pairs 3 --out synth_data</code></pre>
+<h3>2.2 一条命令生成</h3>
+<pre><code># 每个档位（level）生成 3 条混合音，输出到 testsets/
+# LibriSpeech 路径默认取环境变量 LIBRISPEECH_TC（见 run_inference.sh 顶部 ADAPT-THIS）
+LIBRISPEECH_TC=/data/hshi/datasets/LibriSpeech/test-clean \
+./run_inference.sh synth 3 testsets
 
-<h3>2.2 四种声学条件（2×2 鲁棒性网格）</h3>
+# 等价于直接调用 python（--librispeech 是必填项）：
+python synthesize_datasets.py --n-pairs 3 --out testsets \
+    --librispeech /data/hshi/datasets/LibriSpeech/test-clean</code></pre>
+
+<h3>2.3 四种单变量条件</h3>
 <table>
-  <tr><th>条件</th><th>含义</th><th>混合公式</th></tr>
-  <tr><td><code>clean</code></td><td>纯净</td><td>s1 + s2</td></tr>
-  <tr><td><code>noise</code></td><td>加噪</td><td>s1 + s2 + 噪声（SNR 0–10 dB 随机）</td></tr>
-  <tr><td><code>reverb</code></td><td>混响</td><td>reverb(s1) + reverb(s2)</td></tr>
-  <tr><td><code>noise_reverb</code></td><td>加噪 + 混响</td><td>reverb(s1) + reverb(s2) + 噪声</td></tr>
+  <tr><th>条件</th><th>扫的变量</th><th>档位（level）</th></tr>
+  <tr><td><code>sir</code></td><td>两说话人功率比 10·log10(P_s1/P_s2)</td><td>-5, -2.5, 0, 2.5, 5&nbsp;dB</td></tr>
+  <tr><td><code>noise</code></td><td>白噪声相对混合语音的 SNR</td><td>clean, 15, 10, 5, 0&nbsp;dB（clean 不加噪）</td></tr>
+  <tr><td><code>overlap</code></td><td>重叠比例（重叠样点数 / 较短声源长度）</td><td>0.0, 0.25, 0.5, 0.75, 1.0</td></tr>
+  <tr><td><code>gender</code></td><td>说话人性别配对（按 SPEAKERS.TXT）</td><td>same, diff</td></tr>
 </table>
 
-<h3>2.3 输出目录结构</h3>
-<p>每个条件一个子目录，布局与 LibriMix <code>wav8k/max/&lt;set&gt;/</code> 完全一致，<b>单声道、8000&nbsp;Hz</b>：</p>
-<pre class="filetree"><code>synth_data/
-  ├─ <b>clean</b>/
-  │    ├─ mix/      ← 喂给分离模型的混合音  <key>.wav
-  │    ├─ s1/       ← 干净参考源 1（评估用）
-  │    ├─ s2/       ← 干净参考源 2
-  │    ├─ text_spk1 ← "<key> 转写文本" （算 WER 用）
-  │    ├─ text_spk2
-  │    └─ metadata.csv
-  ├─ <b>noise</b>/  ...（同上结构）
-  ├─ <b>reverb</b>/
-  └─ <b>noise_reverb</b>/</code></pre>
-
-<h3>2.4 用真实语音作为声源（推荐）</h3>
-<p>默认用「类语音合成信号」，能让脚本在任何机器上跑通（CI / 无数据冒烟测试）。
-若想用<b>真实语音</b>（如 LibriSpeech 切片），把一个装满 <code>.wav</code> 的目录传给 <code>--source-dir</code>，脚本会两两配对：</p>
-<pre><code>python synthesize_datasets.py \
-    --n-pairs 50 \
-    --source-dir /path/to/librispeech_wavs \
-    --out synth_data_real</code></pre>
+<h3>2.4 输出目录结构</h3>
+<p>每个条件下按档位分子目录，<b>单声道、8000&nbsp;Hz、float32 wav</b>；
+转写文本不再单独存文件，而是写进每个条件的 <code>manifest.csv</code>（<code>text_1</code>/<code>text_2</code> 列）：</p>
+<pre class="filetree"><code>testsets/
+  ├─ <b>sir</b>/
+  │    ├─ -5/
+  │    │   ├─ mix/&lt;utt_id&gt;.wav   ← 喂给分离模型的混合音
+  │    │   ├─ s1/&lt;utt_id&gt;.wav    ← 参考源 1（按混合时的实际摆放）
+  │    │   └─ s2/&lt;utt_id&gt;.wav    ← 参考源 2
+  │    ├─ -2.5/ … 0/ … 2.5/ … 5/   （同上结构）
+  │    └─ manifest.csv  ← utt_id,condition,level,mix,ref_1,ref_2,
+  │                        text_1,text_2,seed,src_1,src_2
+  ├─ <b>noise</b>/clean|15|10|5|0/ …
+  ├─ <b>overlap</b>/0.0|0.25|0.5|0.75|1.0/ …
+  └─ <b>gender</b>/same|diff/ …</code></pre>
 
 <h3>2.5 常用参数</h3>
 <table>
   <tr><th>参数</th><th>默认</th><th>说明</th></tr>
-  <tr><td><code>--n-pairs</code></td><td>3</td><td>每种条件生成多少条混合音</td></tr>
-  <tr><td><code>--out</code></td><td>synth_data</td><td>输出根目录</td></tr>
-  <tr><td><code>--dur</code></td><td>3.0</td><td>合成信号时长（秒），仅合成模式生效</td></tr>
-  <tr><td><code>--source-dir</code></td><td>（空）</td><td>真实语音目录；不填则用合成信号</td></tr>
-  <tr><td><code>--conditions</code></td><td>四种全做</td><td>只做子集，如 <code>--conditions clean noise</code></td></tr>
+  <tr><td><code>--librispeech</code></td><td><b>必填</b></td><td>LibriSpeech <code>test-clean</code> 目录（路径里必须含 test-clean）</td></tr>
+  <tr><td><code>--n-pairs</code></td><td>3</td><td>每个<b>档位</b>生成多少条混合音（不是每个条件）</td></tr>
+  <tr><td><code>--out</code></td><td>testsets</td><td>输出根目录</td></tr>
+  <tr><td><code>--conditions</code></td><td>四种全做</td><td>只做子集，如 <code>--conditions sir noise</code></td></tr>
   <tr><td><code>--seed</code></td><td>0</td><td>随机种子，保证可复现</td></tr>
 </table>
 
 <div class="panel ok">
-  <strong>预期输出（synth 子命令）：</strong>
-<pre><code>Per-condition mixture counts:
+  <strong>预期输出（synth 子命令，--n-pairs 3）：</strong>
+<pre><code>Pool: 40 speakers / NNN utts (3.0-10.0s) from .../test-clean
+Building 3 mixture(s) per level into testsets/
+
+Per-condition mixture counts:
 ----------------------------------------
-  clean             3 mixtures
-  noise             3 mixtures
-  reverb            3 mixtures
-  noise_reverb      3 mixtures
+  sir          15 mixtures  (levels: -5, -2.5, 0, 2.5, 5)
+  noise        15 mixtures  (levels: clean, 15, 10, 5, 0)
+  overlap      15 mixtures  (levels: 0.0, 0.25, 0.5, 0.75, 1.0)
+  gender        6 mixtures  (levels: same, diff)
 ----------------------------------------
-  TOTAL            12 mixtures</code></pre>
+  TOTAL        51 mixtures</code></pre>
 </div>
+
+<h3>2.6 可复现性：--regen 重建任意一条混合音</h3>
+<p>manifest 的每一行都完整记录了（声源路径、条件、档位、随机种子），
+所以任何一条混合音都能<b>逐比特复现</b>，便于审计或排查：</p>
+<pre><code>python synthesize_datasets.py \
+    --regen sir_-5_00_61-70968-0000_121-121726-0001 \
+    --regen-manifest testsets/sir/manifest.csv \
+    --regen-out regen_out
+# 输出 regen_out/&lt;utt_id&gt;.wav，与 manifest 里记录的原始 mix 完全一致</code></pre>
+
+<h3>2.7 在仿真测试集上跑「分离 + 评估」</h3>
+<p>对每个档位：先用 <code>mix/</code> 造一个 <code>.scp</code> 跑推理，再以该档位目录作 <code>--ref-dir</code> 评估：</p>
+<pre><code>cond=sir; lvl=0
+# ① 临时 scp（key 路径 两列）
+for f in testsets/$cond/$lvl/mix/*.wav; do
+  echo "$(basename $f .wav) $(realpath $f)"; done > /tmp/${cond}_${lvl}.scp
+# ② 推理 + 评估（无转写文件，加 --no-wer；SI-SDRi 用 --mix-dir）
+MODEL_CKPT=/path/best.pt MODEL_NET=Net_dwAtt_film \
+./run_inference.sh run  /tmp/${cond}_${lvl}.scp  enhanced/${cond}_${lvl}
+./run_inference.sh eval enhanced/${cond}_${lvl} \
+    --ref-dir testsets/$cond/$lvl \
+    --mix-dir testsets/$cond/$lvl/mix \
+    --no-wer</code></pre>
+<p>想算 WER：转写在 <code>manifest.csv</code> 的 <code>text_1</code>/<code>text_2</code> 列里，先导成
+<code>evaluate.py</code> 认的 <code>text_spkN</code> 格式（每行 <code>&lt;utt_id&gt; 文本</code>）再传入：</p>
+<pre><code>python - &lt;&lt;'EOF'
+import csv
+rows = list(csv.DictReader(open("testsets/sir/manifest.csv")))
+for n in (1, 2):
+    with open(f"testsets/sir/text_spk{n}", "w") as f:
+        for r in rows:
+            f.write(f"{r['utt_id']} {r[f'text_{n}']}\n")
+EOF
+# 然后评估时加：--text-spk1 testsets/sir/text_spk1 --text-spk2 testsets/sir/text_spk2</code></pre>
 
 <!-- ================= 3. 评估 ================= -->
 <h2 id="evaluation">3. 结果评估</h2>
@@ -190,11 +233,11 @@ python synthesize_datasets.py --n-pairs 3 --out synth_data</code></pre>
 <h3>3.1 模型的真实输出格式（评估的输入）</h3>
 <p>分离模型（<code>Separation_nets.py</code>）把结果写成下面的布局——这正是 <code>evaluate.py</code> 读取的格式：</p>
 <pre class="filetree"><code>&lt;save_path&gt;/
-  ├─ <b>spk1</b>/<key>.wav   ← 估计的说话人 1
-  └─ <b>spk2</b>/<key>.wav   ← 估计的说话人 2
+  ├─ <b>spk1</b>/&lt;key&gt;.wav   ← 估计的说话人 1
+  └─ <b>spk2</b>/&lt;key&gt;.wav   ← 估计的说话人 2
 
 · 固定 2 个源，目录名就叫 spk1 / spk2
-· <key> 与混合音、参考源 s1/s2 的文件名完全相同（这是对齐的关键）
+· &lt;key&gt; 与混合音、参考源 s1/s2 的文件名完全相同（这是对齐的关键）
 · 单声道，8000 Hz</code></pre>
 
 <h3>3.2 评估命令</h3>
@@ -265,10 +308,10 @@ LIBRIMIX_ROOT=/lustre/.../LibriMix/Libri2Mix/wav8k/max \
 <!-- ================= 5. FAQ ================= -->
 <h2 id="faq">5. 常见问题</h2>
 
-<h3>Q1：合成数据上 WER 很大（远大于 1）正常吗？</h3>
-<p>正常。合成的「类语音」信号不是真实语音，Whisper 会瞎猜导致大量插入错误，
+<h3>Q1：fixture 假数据上 WER 很大（远大于 1）正常吗？</h3>
+<p>正常。<code>fixture</code> 子命令用的是「类语音合成信号」而不是真实语音，Whisper 会瞎猜导致大量插入错误，
 WER =（替换+删除+插入）/ 参考词数，插入太多就会 &gt; 1。这是真实计算结果，不是 bug。
-想看有意义的 WER，请用 <code>--source-dir</code> 喂真实语音。</p>
+<code>synth</code> 生成的测试集用的是 LibriSpeech 真实语音，WER 是有意义的（转写导出方法见 2.7 节）。</p>
 
 <h3>Q2：只想快速验证脚本能跑通，但没有模型？</h3>
 <p>用 <code>fixture</code> 造一份「模型格式」的假输出（参考源 + 噪声、部分打乱顺序以检验 PIT），再评估：</p>
