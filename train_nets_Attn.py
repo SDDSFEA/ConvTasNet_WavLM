@@ -8,7 +8,7 @@ sys.path.append("./options")
 from Conv_TasNet_wavlm_dwconvFuse import ConvTasNet as Net_dwAtt1
 from Conv_TasNet_wavlm_dwconvFuse_att2 import ConvTasNet as Net_dwAtt2
 from Conv_TasNet_wavlm_dwconvFuse_film import ConvTasNet as Net_dwAtt_film
-from Conv_TasNet_wavlm_dwconvFuse_nogate import ConvTasNet as Net_dwAtt1_nogate
+from ConvTasNet_separation.Conv_TasNet_wavlm_dwconvFuse_wogate import ConvTasNet as Net_dwAtt1_nogate
 from Conv_TasNet_wavlm_dwconvFuse_wogate import ConvTasNet as Net_dwAtt1_wogate
 from Conv_TasNet_wavlm_dwconvFuse_woshare import ConvTasNet as Net_dwAtt1_woshare
 from Conv_TasNet_wavlm_film import ConvTasNet as Net_film

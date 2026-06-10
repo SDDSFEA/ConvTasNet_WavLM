@@ -197,7 +197,7 @@ class Conv1D_Block(nn.Module):
         self.causal = causal
 
         # gate for attention injection
-        # self.attn_gate = GatedResidual(init_logit=-2.0)
+        self.attn_gate = GatedResidual(init_logit=-2.0)
 
     def forward(self, x: torch.Tensor, sem_btd: torch.Tensor, attn: CrossAttnDelta):
         # x: [B, Cin, T]
@@ -214,7 +214,9 @@ class Conv1D_Block(nn.Module):
 
         # Cross-attention delta, injected as gated residual
         delta = attn(c, sem_btd)      # [B, Cout, T]
+        
         # c = self.attn_gate(c, delta)  # [B, Cout, T]
+        c = c + delta
 
         c = self.sc_conv(c)           # [B, Cin, T]
         return x + c

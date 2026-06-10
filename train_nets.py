@@ -10,7 +10,7 @@ from Conv_TasNet_wavlm_film import ConvTasNet as Net_film
 from Conv_TasNet_wavlm_repeat_gate import ConvTasNet as Net_gate
 from Conv_TasNet_wavlm_up import ConvTasNet as Net_up
 from Conv_TasNet_wavlm_dwconvFuse_wogate import ConvTasNet as Net_dwAtt1_wogate
-from Conv_TasNet_wavlm_dwconvFuse_nogate import ConvTasNet as Net_dwAtt1_nogate
+from ConvTasNet_separation.Conv_TasNet_wavlm_dwconvFuse_wogate import ConvTasNet as Net_dwAtt1_nogate
 from Conv_TasNet_wavlm_dwconvFuse_woshare import ConvTasNet as Net_dwAtt1_woshare
 from DataLoaders import make_dataloader
 from option import parse
