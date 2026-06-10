@@ -1,4 +1,5 @@
 import argparse
+import csv
 import torch
 import os
 # os.environ['CUDA_VISIBLE_DEVICES'] = '6'
@@ -12,6 +13,7 @@ def parse_args():
     # p.add_argument("--target_folder1", type=str, default="/home/student/librimix_data/Libri2Mix/Libri2Mix/wav8k/max/test/s1", help="Target folder for speaker 1 (ground truth)")
     # p.add_argument("--target_folder2", type=str, default="/home/student/librimix_data/Libri2Mix/Libri2Mix/wav8k/max/test/s2", help="Target folder for speaker 2 (ground truth)")
     p.add_argument("--batch_size", type=int, default=64, help="Batch size for GPU evaluation")
+    p.add_argument("--save_csv", type=str, default="si_snr_per_utt.csv", help="Path to save per-utterance SI-SNR CSV")
     return p.parse_args()
 
 def pit_si_snr_2spk(ests, refs, eps=1e-8):
@@ -51,6 +53,12 @@ import torchaudio
 import numpy as np
 from tqdm import tqdm
 
+def save_per_utt_csv(rows, csv_path):
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["utt_id", "sisdr", "energy_gap_db"])
+        writer.writerows(rows)
+
 
 def calculate_si_snr_gpu(
     est_folder1,
@@ -72,11 +80,13 @@ def calculate_si_snr_gpu(
     total = len(est1_files)
 
     results = []
+    per_utt_rows = []
 
     for start in tqdm(range(0, total, batch_size), desc="SI-SNR (GPU)"):
         end = min(start + batch_size, total)
 
         ests, refs = [], []
+        utt_ids = []
 
         # -------- load --------
         for i in range(start, end):
@@ -84,6 +94,9 @@ def calculate_si_snr_gpu(
             e2, _  = torchaudio.load(est2_files[i])
             t1, _  = torchaudio.load(tgt1_files[i])
             t2, _  = torchaudio.load(tgt2_files[i])
+
+            utt_id = os.path.basename(est1_files[i])
+            utt_ids.append(utt_id)
 
             assert sr == sample_rate
 
@@ -118,15 +131,25 @@ def calculate_si_snr_gpu(
         with torch.no_grad():
             sisnr = pit_si_snr_2spk(ests, refs)
 
-        results.extend(sisnr.cpu().tolist())
+        sisnr_values = sisnr.cpu().tolist()
+        results.extend(sisnr_values)
+        for local_idx, utt_id in enumerate(utt_ids):
+            ref1 = refs[local_idx, 0]
+            ref2 = refs[local_idx, 1]
+            e_ref1 = torch.mean(ref1 ** 2)
+            e_ref2 = torch.mean(ref2 ** 2)
+            energy_gap_db = torch.abs(
+                10 * torch.log10((e_ref1 + 1e-8) / (e_ref2 + 1e-8))
+            ).item()
+            per_utt_rows.append((utt_id, sisnr_values[local_idx], energy_gap_db))
 
-    return np.array(results)
+    return np.array(results), per_utt_rows
 
 
 if __name__ == "__main__":
     args = parse_args()
 
-    si_snr = calculate_si_snr_gpu(
+    si_snr, per_utt_rows = calculate_si_snr_gpu(
         args.est_folder1,
         args.est_folder2,
         args.target_folder1,
@@ -136,3 +159,5 @@ if __name__ == "__main__":
 
     print(f"Avg SI-SNR: {si_snr.mean():.2f} dB")
     np.save("si_snr_gpu.npy", si_snr)
+    save_per_utt_csv(per_utt_rows, args.save_csv)
+    print(f"Saved per-utterance SI-SNR to: {args.save_csv}")
