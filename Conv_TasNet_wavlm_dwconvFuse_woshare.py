@@ -203,7 +203,7 @@ class Conv1D_Block(nn.Module):
                                   attn_dim=attn_dim, dropout=dropout)
 
         # gate for attention injection
-        # self.attn_gate = GatedResidual(init_logit=-2.0)
+        self.attn_gate = GatedResidual(init_logit=-2.0)
 
     def forward(self, x: torch.Tensor, sem_btd: torch.Tensor):
         # x: [B, Cin, T]
@@ -219,8 +219,8 @@ class Conv1D_Block(nn.Module):
         c = self.norm2(c)
 
         # Cross-attention delta, injected as gated residual
-        c = self.att(c, sem_btd)      # [B, Cout, T]
-        # c = self.attn_gate(c, delta)  # [B, Cout, T]
+        delta = self.att(c, sem_btd)      # [B, Cout, T]
+        c = self.attn_gate(c, delta)  # [B, Cout, T]
 
         c = self.sc_conv(c)           # [B, Cin, T]
         return x + c
@@ -363,10 +363,9 @@ class ConvTasNet(nn.Module):
         params = []
         if hasattr(self, "separation") and hasattr(self.separation, "repeats"):
             for rep in self.separation.repeats:
-                if "attn" in rep:
-                    params += list(rep["attn"].parameters())
-                if "sem_ds" in rep:
-                    params += list(rep["sem_ds"].parameters())
+                for blk in rep["blocks"]:
+                    params += list(blk.att.parameters())
+                    params += list(blk.attn_gate.parameters())
         return params
 
     def get_audio_parameters(self):
