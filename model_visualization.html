@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Conv-TasNet + WavLM (dwconvFuse) — Visualizations</title>
+<style>
+  :root {
+    --audio:   #2563eb;   /* blue  — acoustic path  */
+    --sem:     #d97706;   /* amber — semantic path  */
+    --fuse:    #7c3aed;   /* violet — fusion        */
+    --out:     #059669;   /* green — outputs        */
+    --ink:     #1e293b;
+    --muted:   #64748b;
+    --bg:      #f8fafc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    margin: 0;
+    padding: 32px 24px 64px;
+  }
+  h1 { text-align: center; font-size: 26px; margin: 0 0 4px; }
+  .subtitle { text-align: center; color: var(--muted); margin-bottom: 36px; font-size: 14px; }
+  .fig {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    box-shadow: 0 2px 10px rgba(15,23,42,.06);
+    max-width: 1240px;
+    margin: 0 auto 44px;
+    padding: 20px 24px 12px;
+  }
+  .fig h2 { font-size: 19px; margin: 4px 0 2px; }
+  .fig p.caption { color: var(--muted); font-size: 13.5px; margin: 2px 0 14px; line-height: 1.5; }
+  svg { width: 100%; height: auto; display: block; }
+  .legend { display: flex; gap: 22px; justify-content: center; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); padding: 10px 0 6px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+
+  /* SVG text */
+  text { font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; fill: var(--ink); }
+  .t-title  { font-size: 14px; font-weight: 600; }
+  .t-big    { font-size: 15px; font-weight: 700; }
+  .t-label  { font-size: 12.5px; font-weight: 600; }
+  .t-sub    { font-size: 10.5px; fill: var(--muted); }
+  .t-dim    { font-size: 10px;  fill: var(--muted); font-style: italic; }
+  .t-white  { fill: #ffffff; }
+  .t-note   { font-size: 11px; fill: var(--muted); }
+</style>
+</head>
+<body>
+
+<h1>Conv-TasNet + WavLM &nbsp;·&nbsp; dwconvFuse</h1>
+<p class="subtitle">
+  <code>Conv_TasNet_wavlm_dwconvFuse.py</code> — 2-speaker separation with frozen-WavLM semantic features
+  injected after the depthwise conv of every TCN block via gated cross-attention
+</p>
+
+<!-- ════════════════════════════════════════════════════════════════════
+     FIGURE 1 — CONCEPT
+═════════════════════════════════════════════════════════════════════ -->
+<div class="fig">
+  <h2>1 · Concept</h2>
+  <p class="caption">
+    The core idea: a time-domain separator (Conv-TasNet) hears <em>how</em> the mixture sounds, while a frozen
+    WavLM encoder understands <em>what</em> is being said. Cross-attention lets every acoustic frame query the
+    semantic sequence, and a learnable gate (initialized nearly closed, σ(−2) ≈ 0.12) blends the semantic hint in
+    only as far as it actually helps separation.
+  </p>
+  <svg viewBox="0 0 1180 430">
+    <defs>
+      <marker id="arr" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+        <path d="M0,0 L8,4.5 L0,9 z" fill="#94a3b8"/>
+      </marker>
+      <marker id="arrA" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+        <path d="M0,0 L8,4.5 L0,9 z" fill="#2563eb"/>
+      </marker>
+      <marker id="arrS" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+        <path d="M0,0 L8,4.5 L0,9 z" fill="#d97706"/>
+      </marker>
+      <marker id="arrF" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+        <path d="M0,0 L8,4.5 L0,9 z" fill="#7c3aed"/>
+      </marker>
+      <marker id="arrG" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+        <path d="M0,0 L8,4.5 L0,9 z" fill="#059669"/>
+      </marker>
+      <linearGradient id="mixg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#475569"/><stop offset="1" stop-color="#334155"/>
+      </linearGradient>
+    </defs>
+
+    <!-- mixture -->
+    <rect x="30" y="165" width="170" height="100" rx="12" fill="url(#mixg)"/>
+    <text x="115" y="197" text-anchor="middle" class="t-big t-white">Mixture</text>
+    <text x="115" y="216" text-anchor="middle" class="t-sub" fill="#cbd5e1" style="fill:#cbd5e1">spk1 + spk2 (Libri2Mix)</text>
+    <!-- little waveform -->
+    <polyline points="55,243 65,233 75,250 85,228 95,247 105,231 115,252 125,235 135,246 145,230 155,248 165,237 175,243"
+              fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"/>
+
+    <!-- split arrows -->
+    <path d="M200,195 C260,195 260,95 320,95"  fill="none" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrA)"/>
+    <path d="M200,235 C260,235 260,335 320,335" fill="none" stroke="#d97706" stroke-width="2.5" marker-end="url(#arrS)"/>
+
+    <!-- acoustic path -->
+    <rect x="325" y="48" width="290" height="96" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+    <text x="470" y="80" text-anchor="middle" class="t-big" fill="#1d4ed8" style="fill:#1d4ed8">Acoustic path</text>
+    <text x="470" y="101" text-anchor="middle" class="t-label">Conv-TasNet encoder + TCN</text>
+    <text x="470" y="122" text-anchor="middle" class="t-sub">“how it sounds” — fine time–frequency detail, trainable</text>
+
+    <!-- semantic path -->
+    <rect x="325" y="288" width="290" height="96" rx="12" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+    <text x="470" y="320" text-anchor="middle" class="t-big" fill="#b45309" style="fill:#b45309">Semantic path</text>
+    <text x="470" y="341" text-anchor="middle" class="t-label">WavLM encoder ❄ frozen</text>
+    <text x="470" y="362" text-anchor="middle" class="t-sub">“what is said &amp; by whom” — phonetic / speaker context</text>
+
+    <!-- fusion -->
+    <rect x="700" y="146" width="270" height="138" rx="14" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2.5"/>
+    <text x="835" y="180" text-anchor="middle" class="t-big" fill="#6d28d9" style="fill:#6d28d9">Gated cross-attention</text>
+    <text x="835" y="204" text-anchor="middle" class="t-label">Q = audio frames</text>
+    <text x="835" y="223" text-anchor="middle" class="t-label">K, V = WavLM features</text>
+    <text x="835" y="248" text-anchor="middle" class="t-sub">x ← x + σ(g) · Δ&nbsp;&nbsp;(gate starts ≈ 0.12)</text>
+    <text x="835" y="267" text-anchor="middle" class="t-sub">inside every TCN block, after the depthwise conv</text>
+
+    <!-- arrows into fusion -->
+    <path d="M615,96 C665,96 660,180 698,185" fill="none" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrA)"/>
+    <text x="655" y="120" class="t-note" fill="#1d4ed8" style="fill:#1d4ed8">queries</text>
+    <path d="M615,336 C665,336 660,250 698,245" fill="none" stroke="#d97706" stroke-width="2.5" marker-end="url(#arrS)"/>
+    <text x="640" y="320" class="t-note" fill="#b45309" style="fill:#b45309">keys / values</text>
+
+    <!-- output -->
+    <path d="M970,215 L1020,215" fill="none" stroke="#059669" stroke-width="2.5" marker-end="url(#arrG)"/>
+    <rect x="1025" y="138" width="125" height="66" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+    <text x="1087" y="165" text-anchor="middle" class="t-label" fill="#047857" style="fill:#047857">Speaker 1</text>
+    <polyline points="1043,185 1051,178 1059,189 1067,176 1075,188 1083,179 1091,190 1099,177 1107,187 1115,180 1123,186 1131,182"
+              fill="none" stroke="#059669" stroke-width="1.8" stroke-linecap="round"/>
+    <rect x="1025" y="226" width="125" height="66" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+    <text x="1087" y="253" text-anchor="middle" class="t-label" fill="#047857" style="fill:#047857">Speaker 2</text>
+    <polyline points="1043,273 1053,266 1061,278 1071,265 1079,276 1087,268 1097,279 1105,266 1113,275 1121,269 1131,274"
+              fill="none" stroke="#059669" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M1005,205 C1015,200 1015,180 1023,175" fill="none" stroke="#059669" stroke-width="2" marker-end="url(#arrG)"/>
+    <path d="M1005,225 C1015,230 1015,250 1023,255" fill="none" stroke="#059669" stroke-width="2" marker-end="url(#arrG)"/>
+
+    <text x="590" y="418" text-anchor="middle" class="t-note">
+      Semantics never replace acoustics — they are added as a small, gated correction (Δ) that the model learns to open only where context helps.
+    </text>
+  </svg>
+  <div class="legend">
+    <span><i class="dot" style="background:#2563eb"></i>acoustic (trainable)</span>
+    <span><i class="dot" style="background:#d97706"></i>semantic (frozen WavLM)</span>
+    <span><i class="dot" style="background:#7c3aed"></i>fusion</span>
+    <span><i class="dot" style="background:#059669"></i>separated outputs</span>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════
+     FIGURE 2 — PIPELINE
+═════════════════════════════════════════════════════════════════════ -->
+<div class="fig">
+  <h2>2 · End-to-end pipeline</h2>
+  <p class="caption">
+    Data flow of <code>ConvTasNet.forward()</code>: the raw mixture feeds both branches; the separation module fuses
+    them and produces per-speaker masks that are applied to the <em>encoder</em> output <b>w</b> before decoding.
+    Training uses permutation-invariant SI-SNR (<code>SI_SNR.si_snr_loss</code>).
+  </p>
+  <svg viewBox="0 0 1180 470">
+    <defs>
+      <marker id="parr" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+        <path d="M0,0 L8,4.5 L0,9 z" fill="#475569"/>
+      </marker>
+      <marker id="parrS" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+        <path d="M0,0 L8,4.5 L0,9 z" fill="#d97706"/>
+      </marker>
+      <marker id="parrR" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+        <path d="M0,0 L8,4.5 L0,9 z" fill="#dc2626"/>
+      </marker>
+    </defs>
+
+    <!-- ===== top row: acoustic chain ===== -->
+    <!-- input -->
+    <rect x="20" y="100" width="120" height="70" rx="10" fill="#334155"/>
+    <text x="80" y="129" text-anchor="middle" class="t-label t-white">mixture x</text>
+    <text x="80" y="150" text-anchor="middle" class="t-dim" style="fill:#cbd5e1">[B, T] · 8 kHz</text>
+
+    <!-- encoder -->
+    <rect x="180" y="100" width="135" height="70" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+    <text x="247" y="124" text-anchor="middle" class="t-label">Encoder</text>
+    <text x="247" y="141" text-anchor="middle" class="t-sub">Conv1D(1→N, L=16, s=8)</text>
+    <text x="247" y="158" text-anchor="middle" class="t-dim">w : [B, 512, T′]</text>
+
+    <!-- norm + bottleneck -->
+    <rect x="355" y="100" width="135" height="70" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+    <text x="422" y="124" text-anchor="middle" class="t-label">cLN + Bottleneck</text>
+    <text x="422" y="141" text-anchor="middle" class="t-sub">Conv1D(N→B, 1)</text>
+    <text x="422" y="158" text-anchor="middle" class="t-dim">e : [B, 128, T′]</text>
+
+    <!-- separation -->
+    <rect x="530" y="86" width="200" height="98" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2.5"/>
+    <text x="630" y="113" text-anchor="middle" class="t-label" fill="#6d28d9" style="fill:#6d28d9">SeparationModule</text>
+    <text x="630" y="132" text-anchor="middle" class="t-sub">R=3 repeats × X=8 TCN blocks</text>
+    <text x="630" y="149" text-anchor="middle" class="t-sub">cross-attn fusion in every block</text>
+    <text x="630" y="170" text-anchor="middle" class="t-dim">[B, 128, T′]</text>
+
+    <!-- mask head -->
+    <rect x="770" y="100" width="140" height="70" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+    <text x="840" y="124" text-anchor="middle" class="t-label">Mask head</text>
+    <text x="840" y="141" text-anchor="middle" class="t-sub">Conv1D(B→2·N) + ReLU</text>
+    <text x="840" y="158" text-anchor="middle" class="t-dim">m₁, m₂ : [B, 512, T′]</text>
+
+    <!-- multiply -->
+    <circle cx="965" cy="135" r="20" fill="#fff" stroke="#475569" stroke-width="2"/>
+    <text x="965" y="142" text-anchor="middle" class="t-big">⊗</text>
+
+    <!-- decoder -->
+    <rect x="1020" y="100" width="140" height="70" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+    <text x="1090" y="124" text-anchor="middle" class="t-label">Decoder ×2</text>
+    <text x="1090" y="141" text-anchor="middle" class="t-sub">ConvTrans1D(N→1, L=16)</text>
+    <text x="1090" y="158" text-anchor="middle" class="t-dim">ŝ₁, ŝ₂ : [B, T]</text>
+
+    <!-- chain arrows -->
+    <line x1="140" y1="135" x2="178" y2="135" stroke="#475569" stroke-width="2" marker-end="url(#parr)"/>
+    <line x1="315" y1="135" x2="353" y2="135" stroke="#475569" stroke-width="2" marker-end="url(#parr)"/>
+    <line x1="490" y1="135" x2="528" y2="135" stroke="#475569" stroke-width="2" marker-end="url(#parr)"/>
+    <line x1="730" y1="135" x2="768" y2="135" stroke="#475569" stroke-width="2" marker-end="url(#parr)"/>
+    <line x1="910" y1="135" x2="943" y2="135" stroke="#475569" stroke-width="2" marker-end="url(#parr)"/>
+    <line x1="985" y1="135" x2="1018" y2="135" stroke="#475569" stroke-width="2" marker-end="url(#parr)"/>
+
+    <!-- skip from encoder w to multiply -->
+    <path d="M247,98 C247,40 965,40 965,113" fill="none" stroke="#2563eb" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#parr)"/>
+    <text x="610" y="32" text-anchor="middle" class="t-note" fill="#1d4ed8" style="fill:#1d4ed8">encoder output w (masked, not the bottleneck features)</text>
+
+    <!-- ===== semantic branch ===== -->
+    <rect x="180" y="240" width="240" height="74" rx="10" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+    <text x="300" y="266" text-anchor="middle" class="t-label" fill="#b45309" style="fill:#b45309">WavLMencoder ❄ frozen</text>
+    <text x="300" y="284" text-anchor="middle" class="t-sub">WavLMModel.from_pretrained(...)</text>
+    <text x="300" y="302" text-anchor="middle" class="t-dim">sem : [B, T_sem, D=768]</text>
+
+    <path d="M80,170 C80,277 130,277 178,277" fill="none" stroke="#d97706" stroke-width="2.5" marker-end="url(#parrS)"/>
+    <text x="118" y="232" class="t-note" fill="#b45309" style="fill:#b45309">raw waveform</text>
+    <path d="M420,277 C500,277 560,250 612,188" fill="none" stroke="#d97706" stroke-width="2.5" marker-end="url(#parrS)"/>
+    <text x="520" y="246" class="t-note" fill="#b45309" style="fill:#b45309">K, V to every block</text>
+
+    <!-- ===== training loss ===== -->
+    <rect x="770" y="240" width="390" height="74" rx="10" fill="#fef2f2" stroke="#dc2626" stroke-width="2"/>
+    <text x="965" y="266" text-anchor="middle" class="t-label" fill="#b91c1c" style="fill:#b91c1c">PIT SI-SNR loss (training)</text>
+    <text x="965" y="285" text-anchor="middle" class="t-sub">best speaker permutation of −SI-SNR(ŝ, s) · SI_SNR.si_snr_loss</text>
+    <text x="965" y="303" text-anchor="middle" class="t-sub">Adam + ReduceLROnPlateau · grad clip · save best.pt / last.pt</text>
+    <path d="M1090,170 C1090,200 1040,215 1000,238" fill="none" stroke="#dc2626" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#parrR)"/>
+    <text x="1118" y="205" class="t-note" fill="#b91c1c" style="fill:#b91c1c">ŝ₁, ŝ₂</text>
+
+    <!-- ===== stage strip ===== -->
+    <g>
+      <rect x="20"  y="368" width="218" height="64" rx="9" fill="#f1f5f9" stroke="#cbd5e1"/>
+      <text x="129" y="392" text-anchor="middle" class="t-label">① Data prep</text>
+      <text x="129" y="411" text-anchor="middle" class="t-sub">create_scp.py → tr/cv/tt .scp · 4 s chunks</text>
+
+      <rect x="254" y="368" width="218" height="64" rx="9" fill="#f1f5f9" stroke="#cbd5e1"/>
+      <text x="363" y="392" text-anchor="middle" class="t-label">② Train</text>
+      <text x="363" y="411" text-anchor="middle" class="t-sub">train.py --opt options/train/*.yml</text>
+
+      <rect x="488" y="368" width="218" height="64" rx="9" fill="#f1f5f9" stroke="#cbd5e1"/>
+      <text x="597" y="392" text-anchor="middle" class="t-label">③ Separate</text>
+      <text x="597" y="411" text-anchor="middle" class="t-sub">Separation_nets.py → enhanced/&lt;dir&gt;</text>
+
+      <rect x="722" y="368" width="218" height="64" rx="9" fill="#f1f5f9" stroke="#cbd5e1"/>
+      <text x="831" y="392" text-anchor="middle" class="t-label">④ Score SI-SNR</text>
+      <text x="831" y="411" text-anchor="middle" class="t-sub">SI_SNR_eval.py (offline PIT scoring)</text>
+
+      <rect x="956" y="368" width="204" height="64" rx="9" fill="#f1f5f9" stroke="#cbd5e1"/>
+      <text x="1058" y="392" text-anchor="middle" class="t-label">⑤ Score WER</text>
+      <text x="1058" y="411" text-anchor="middle" class="t-sub">whisper_ASR.py → compute_wer.py</text>
+
+      <line x1="238" y1="400" x2="252" y2="400" stroke="#94a3b8" stroke-width="2" marker-end="url(#parr)"/>
+      <line x1="472" y1="400" x2="486" y2="400" stroke="#94a3b8" stroke-width="2" marker-end="url(#parr)"/>
+      <line x1="706" y1="400" x2="720" y2="400" stroke="#94a3b8" stroke-width="2" marker-end="url(#parr)"/>
+      <line x1="940" y1="400" x2="954" y2="400" stroke="#94a3b8" stroke-width="2" marker-end="url(#parr)"/>
+    </g>
+    <text x="590" y="456" text-anchor="middle" class="t-note">Experiment workflow around the model (repo entry points)</text>
+  </svg>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════
+     FIGURE 3 — ARCHITECTURE
+═════════════════════════════════════════════════════════════════════ -->
+<div class="fig">
+  <h2>3 · Architecture detail — TCN block with dwconvFuse injection</h2>
+  <p class="caption">
+    Left: the separation stack — R=3 repeats, each owning <em>one shared</em> <code>CrossAttnDelta</code> used by all
+    of its X=8 dilated blocks (dilation 2⁰…2⁷). Right: inside one <code>Conv1D_Block</code> — the semantic delta is
+    computed from the post-depthwise-conv features (hence “dwconvFuse”) and merged through
+    <code>GatedResidual</code> before the 1×1 skip projection.
+  </p>
+  <svg viewBox="0 0 1180 640">
+    <defs>
+      <marker id="aarr" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+        <path d="M0,0 L8,4.5 L0,9 z" fill="#475569"/>
+      </marker>
+      <marker id="aarrS" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+        <path d="M0,0 L8,4.5 L0,9 z" fill="#d97706"/>
+      </marker>
+      <marker id="aarrF" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+        <path d="M0,0 L8,4.5 L0,9 z" fill="#7c3aed"/>
+      </marker>
+    </defs>
+
+    <!-- ════ LEFT: stack of repeats ════ -->
+    <text x="225" y="30" text-anchor="middle" class="t-title">SeparationModule (R=3 × X=8)</text>
+
+    <!-- input -->
+    <rect x="150" y="48" width="150" height="40" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+    <text x="225" y="68" text-anchor="middle" class="t-label">e : [B, 128, T′]</text>
+    <text x="225" y="82" text-anchor="middle" class="t-dim">from bottleneck</text>
+    <line x1="225" y1="88" x2="225" y2="106" stroke="#475569" stroke-width="2" marker-end="url(#aarr)"/>
+
+    <!-- repeats -->
+    <g>
+      <!-- Repeat 1 (expanded) -->
+      <rect x="60" y="110" width="330" height="220" rx="12" fill="#fafaf9" stroke="#a8a29e" stroke-width="1.5"/>
+      <text x="78" y="133" class="t-label">Repeat 1</text>
+
+      <!-- shared attn chip -->
+      <rect x="240" y="118" width="138" height="38" rx="8" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+      <text x="309" y="134" text-anchor="middle" class="t-label" fill="#6d28d9" style="fill:#6d28d9">CrossAttnDelta</text>
+      <text x="309" y="149" text-anchor="middle" class="t-sub">shared by all 8 blocks</text>
+
+      <!-- 8 blocks -->
+      <g>
+        <rect x="80" y="166" width="64" height="34" rx="6" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
+        <text x="112" y="181" text-anchor="middle" class="t-sub">Block 1</text>
+        <text x="112" y="194" text-anchor="middle" class="t-dim">d=1</text>
+
+        <rect x="156" y="166" width="64" height="34" rx="6" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
+        <text x="188" y="181" text-anchor="middle" class="t-sub">Block 2</text>
+        <text x="188" y="194" text-anchor="middle" class="t-dim">d=2</text>
+
+        <rect x="232" y="166" width="64" height="34" rx="6" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
+        <text x="264" y="181" text-anchor="middle" class="t-sub">Block 3</text>
+        <text x="264" y="194" text-anchor="middle" class="t-dim">d=4</text>
+
+        <rect x="308" y="166" width="64" height="34" rx="6" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
+        <text x="340" y="181" text-anchor="middle" class="t-sub">…</text>
+        <text x="340" y="194" text-anchor="middle" class="t-dim">d=2ⁱ</text>
+
+        <rect x="80" y="214" width="64" height="34" rx="6" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
+        <text x="112" y="229" text-anchor="middle" class="t-sub">Block 6</text>
+        <text x="112" y="242" text-anchor="middle" class="t-dim">d=32</text>
+
+        <rect x="156" y="214" width="64" height="34" rx="6" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
+        <text x="188" y="229" text-anchor="middle" class="t-sub">Block 7</text>
+        <text x="188" y="242" text-anchor="middle" class="t-dim">d=64</text>
+
+        <rect x="232" y="214" width="64" height="34" rx="6" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
+        <text x="264" y="229" text-anchor="middle" class="t-sub">Block 8</text>
+        <text x="264" y="242" text-anchor="middle" class="t-dim">d=128</text>
+
+        <!-- attn feed lines -->
+        <path d="M309,156 C309,162 280,164 270,164" fill="none" stroke="#7c3aed" stroke-width="1.3" stroke-dasharray="3 3"/>
+        <path d="M309,156 C309,168 200,162 190,164" fill="none" stroke="#7c3aed" stroke-width="1.3" stroke-dasharray="3 3"/>
+        <path d="M309,156 C309,170 124,160 114,164" fill="none" stroke="#7c3aed" stroke-width="1.3" stroke-dasharray="3 3"/>
+      </g>
+      <text x="225" y="278" text-anchor="middle" class="t-sub">receptive field grows exponentially: kernel P=3, dilation 1 → 128</text>
+      <text x="225" y="298" text-anchor="middle" class="t-sub">every block: x ← x + f(x, sem)   (residual, channels stay 128)</text>
+
+      <line x1="225" y1="330" x2="225" y2="348" stroke="#475569" stroke-width="2" marker-end="url(#aarr)"/>
+
+      <!-- Repeat 2, 3 (collapsed) -->
+      <rect x="60" y="352" width="330" height="44" rx="12" fill="#fafaf9" stroke="#a8a29e" stroke-width="1.5"/>
+      <text x="225" y="379" text-anchor="middle" class="t-label">Repeat 2 — own shared CrossAttnDelta, 8 blocks</text>
+      <line x1="225" y1="396" x2="225" y2="414" stroke="#475569" stroke-width="2" marker-end="url(#aarr)"/>
+
+      <rect x="60" y="418" width="330" height="44" rx="12" fill="#fafaf9" stroke="#a8a29e" stroke-width="1.5"/>
+      <text x="225" y="445" text-anchor="middle" class="t-label">Repeat 3 — own shared CrossAttnDelta, 8 blocks</text>
+      <line x1="225" y1="462" x2="225" y2="480" stroke="#475569" stroke-width="2" marker-end="url(#aarr)"/>
+    </g>
+
+    <!-- output of stack -->
+    <rect x="150" y="484" width="150" height="40" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+    <text x="225" y="504" text-anchor="middle" class="t-label">[B, 128, T′]</text>
+    <text x="225" y="518" text-anchor="middle" class="t-dim">→ mask head</text>
+
+    <!-- semantic feed on far left -->
+    <rect x="20" y="560" width="370" height="44" rx="9" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+    <text x="205" y="579" text-anchor="middle" class="t-label" fill="#b45309" style="fill:#b45309">sem : [B, T_sem, 768] — WavLM, frozen ❄</text>
+    <text x="205" y="596" text-anchor="middle" class="t-sub">same tensor broadcast to all 24 blocks (K, V)</text>
+    <path d="M30,558 C30,300 48,230 58,225" fill="none" stroke="#d97706" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#aarrS)"/>
+
+    <!-- ════ RIGHT: one block, exploded ════ -->
+    <text x="800" y="30" text-anchor="middle" class="t-title">Inside one Conv1D_Block (dwconvFuse)</text>
+
+    <!-- container -->
+    <rect x="520" y="44" width="560" height="560" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+
+    <!-- input -->
+    <rect x="660" y="62" width="170" height="36" rx="8" fill="#f1f5f9" stroke="#94a3b8"/>
+    <text x="745" y="85" text-anchor="middle" class="t-label">x : [B, 128, T′]</text>
+    <line x1="745" y1="98" x2="745" y2="114" stroke="#475569" stroke-width="2" marker-end="url(#aarr)"/>
+
+    <!-- conv1x1 -->
+    <rect x="645" y="118" width="200" height="46" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+    <text x="745" y="138" text-anchor="middle" class="t-label">1×1 Conv (128 → 512)</text>
+    <text x="745" y="155" text-anchor="middle" class="t-sub">PReLU → gLN</text>
+    <line x1="745" y1="164" x2="745" y2="180" stroke="#475569" stroke-width="2" marker-end="url(#aarr)"/>
+
+    <!-- dwconv -->
+    <rect x="645" y="184" width="200" height="46" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="2.5"/>
+    <text x="745" y="204" text-anchor="middle" class="t-label">Depthwise Conv (k=3, dil=2ⁱ)</text>
+    <text x="745" y="221" text-anchor="middle" class="t-sub">groups=512 → PReLU → gLN</text>
+    <line x1="745" y1="230" x2="745" y2="246" stroke="#475569" stroke-width="2" marker-end="url(#aarr)"/>
+    <text x="868" y="210" class="t-note" fill="#1d4ed8" style="fill:#1d4ed8">← fusion point is HERE</text>
+
+    <!-- c branch label -->
+    <text x="700" y="262" text-anchor="end" class="t-dim">c : [B, 512, T′]</text>
+
+    <!-- cross attention block -->
+    <rect x="560" y="276" width="480" height="170" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2.5"/>
+    <text x="800" y="300" text-anchor="middle" class="t-label" fill="#6d28d9" style="fill:#6d28d9">CrossAttnDelta (repeat-shared)</text>
+
+    <!-- Q -->
+    <rect x="580" y="316" width="130" height="40" rx="7" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
+    <text x="645" y="333" text-anchor="middle" class="t-sub">LN → Q = Linear</text>
+    <text x="645" y="348" text-anchor="middle" class="t-dim">512 → 128</text>
+    <!-- K V -->
+    <rect x="580" y="366" width="130" height="40" rx="7" fill="#fffbeb" stroke="#d97706" stroke-width="1.5"/>
+    <text x="645" y="383" text-anchor="middle" class="t-sub">K, V = Linear</text>
+    <text x="645" y="398" text-anchor="middle" class="t-dim">768 → 128</text>
+
+    <!-- softmax attn -->
+    <rect x="760" y="334" width="150" height="56" rx="7" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+    <text x="835" y="356" text-anchor="middle" class="t-sub">softmax(QKᵀ / √128)</text>
+    <text x="835" y="372" text-anchor="middle" class="t-sub">→ dropout → · V</text>
+
+    <!-- out proj -->
+    <rect x="940" y="334" width="84" height="56" rx="7" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+    <text x="982" y="356" text-anchor="middle" class="t-sub">out proj</text>
+    <text x="982" y="372" text-anchor="middle" class="t-dim">128 → 512</text>
+
+    <line x1="710" y1="336" x2="758" y2="352" stroke="#475569" stroke-width="1.5" marker-end="url(#aarr)"/>
+    <line x1="710" y1="386" x2="758" y2="372" stroke="#475569" stroke-width="1.5" marker-end="url(#aarr)"/>
+    <line x1="910" y1="362" x2="938" y2="362" stroke="#475569" stroke-width="1.5" marker-end="url(#aarr)"/>
+
+    <text x="800" y="430" text-anchor="middle" class="t-sub">attn map: [B, T′, T_sem] — each audio frame attends over the semantic sequence</text>
+
+    <!-- c into Q -->
+    <path d="M745,246 C745,262 660,300 645,314" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#aarr)"/>
+    <!-- sem into KV -->
+    <path d="M530,604 C530,470 560,420 578,395" fill="none" stroke="#d97706" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#aarrS)"/>
+    <rect x="540" y="588" width="290" height="32" rx="8" fill="#fffbeb" stroke="#d97706" stroke-width="1.5"/>
+    <text x="685" y="608" text-anchor="middle" class="t-sub" style="fill:#b45309">sem [B, T_sem, 768] from WavLM ❄</text>
+
+    <!-- delta out -->
+    <path d="M1024,362 C1058,362 1058,470 1010,470" fill="none" stroke="#7c3aed" stroke-width="2" marker-end="url(#aarrF)"/>
+    <text x="1062" y="424" class="t-dim" text-anchor="middle">Δ</text>
+
+    <!-- gated residual -->
+    <rect x="800" y="448" width="210" height="44" rx="8" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+    <text x="905" y="467" text-anchor="middle" class="t-label" fill="#6d28d9" style="fill:#6d28d9">GatedResidual</text>
+    <text x="905" y="484" text-anchor="middle" class="t-sub">c ← c + σ(g)·Δ ,  g init = −2</text>
+
+    <!-- c bypass into gate -->
+    <path d="M745,246 C745,262 720,460 798,470" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#aarr)"/>
+    <text x="722" y="470" text-anchor="end" class="t-dim">c (identity)</text>
+
+    <!-- sc conv -->
+    <line x1="905" y1="492" x2="905" y2="508" stroke="#475569" stroke-width="2" marker-end="url(#aarr)"/>
+    <rect x="800" y="512" width="210" height="40" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+    <text x="905" y="530" text-anchor="middle" class="t-label">1×1 Conv (512 → 128)</text>
+    <text x="905" y="546" text-anchor="middle" class="t-dim">sc_conv</text>
+
+    <!-- residual add -->
+    <circle cx="905" cy="578" r="15" fill="#fff" stroke="#475569" stroke-width="2"/>
+    <text x="905" y="584" text-anchor="middle" class="t-label">+</text>
+    <line x1="905" y1="552" x2="905" y2="561" stroke="#475569" stroke-width="2" marker-end="url(#aarr)"/>
+    <!-- block-level residual from x -->
+    <path d="M830,80 C1060,80 1060,578 922,578" fill="none" stroke="#94a3b8" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#aarr)"/>
+    <text x="1066" y="330" class="t-dim" text-anchor="middle" transform="rotate(90 1066 330)">block residual: x + c</text>
+
+    <!-- output -->
+    <line x1="888" y1="578" x2="868" y2="578" stroke="#475569" stroke-width="2"/>
+    <text x="862" y="582" text-anchor="end" class="t-label">→ next block, [B, 128, T′]</text>
+  </svg>
+  <div class="legend">
+    <span><i class="dot" style="background:#dbeafe;border:1.5px solid #2563eb"></i>convolutional (audio)</span>
+    <span><i class="dot" style="background:#f5f3ff;border:1.5px solid #7c3aed"></i>attention / fusion</span>
+    <span><i class="dot" style="background:#fffbeb;border:1.5px solid #d97706"></i>WavLM semantic input</span>
+  </div>
+  <p class="caption" style="margin-top:6px">
+    Hyper-parameters (defaults in <code>ConvTasNet.__init__</code>): N=512, L=16, B=128, H=512, P=3, X=8, R=3,
+    attn_dim=128, dropout=0.1, gLN, non-causal, num_spks=2, <code>freeze_wavlm=True</code>. The
+    <code>SemanticDownsampler</code> exists in the file but is commented out in <code>SeparationModule.forward</code> —
+    attention currently runs over the full WavLM sequence.
+  </p>
+</div>
+
+</body>
+</html>
